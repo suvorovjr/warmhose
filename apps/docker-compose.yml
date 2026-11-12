@@ -1,8 +1,13 @@
 services:
-  # postgres:
-  #   image: postgres:16-alpine
-  #   container_name: smarthome-postgres
-  # ## тут нужно добавить настройки
+  postgres:
+    image: postgres:16-alpine
+    container_name: smarthome-postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - smarthome-network
+    volumes:
+        - ./smart_home/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   temperature-api:
     build:
@@ -21,8 +26,8 @@ services:
       dockerfile: Dockerfile
     container_name: smarthome-app
     depends_on:
-      # postgres:
-      #   condition: service_healthy
+      postgres:
+        condition: service_healthy
       temperature-api:
         condition: service_started
     environment:
