@@ -1,0 +1,145 @@
+@startuml
+left to right direction
+hide circle
+hide empty members
+skinparam linetype ortho
+skinparam shadowing false
+skinparam roundCorner 12
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 13
+skinparam nodesep 60
+skinparam ranksep 60
+skinparam packageStyle rectangle
+
+skinparam package {
+  BorderColor #C9CED6
+  BackgroundColor #FBFBFC
+  FontColor #6B7280
+  FontStyle normal
+}
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #9AA3AF
+  HeaderBackgroundColor #EEF1F6
+  FontStyle bold
+  AttributeFontColor #374151
+}
+skinparam ArrowColor #8A94A3
+skinparam ArrowFontColor #6B7280
+
+package "Auth DB" {
+  entity "user" as user {
+    id : uuid <<PK>>
+    --
+    name : varchar
+    email : varchar
+    hashed_password : varchar
+  }
+  entity "session" as session {
+    id : uuid <<PK>>
+    --
+    user_id : uuid <<FK>>
+    hashed_refresh_token : varchar
+    last_seen_at : timestamptz
+  }
+}
+
+package "House DB" {
+  enum "user_permission" as user_permission {
+    SET
+    GET
+  }
+
+  enum "zone_type" as zone_type {
+    GARAGE
+    OUTSIDE
+    ROOM
+    OTHER
+  }
+
+  entity "house" as house {
+    id : uuid <<PK>>
+    --
+    name : varchar
+    address : varchar | null
+  }
+
+  entity "zone" as zone {
+    id : uuid <<PK>>
+    --
+    house_id : uuid <<FK>>
+    name : varchar
+    type : zone_type
+  }
+
+  entity "house_permission" as house_permission {
+    user_id : uuid <<PK>>
+    house_id : uuid <<PK>> <<FK>>
+    --
+    permission : user_permission
+  }
+}
+
+package "Device DB" {
+  enum "device_type" as device_type {
+    CAMERA
+    LIGHT
+    THERMOSTAT
+    GATE
+  }
+
+  enum "device_status" as device_status {
+    PAIRING
+    ACTIVE
+    DELETED
+  }
+
+  entity "device" as device {
+    id : uuid <<PK>>
+    --
+    house_id : uuid
+    zone_id : uuid | null
+    type : device_type
+    status : device_status
+    last_seen_at : timestamptz
+    target_state : jsonb
+    actual_state : jsonb
+  }
+}
+
+package "Telemetry DB" {
+  entity "camera_storage" as camera_storage {
+    id : uuid <<PK>>
+    --
+    device_id : uuid
+    started_at : timestamptz
+    ended_at : timestamptz
+    path : varchar
+  }
+  entity "device_telemetry" as device_telemetry {
+    id : uuid <<PK>>
+    --
+    device_id : uuid
+    processed_at : timestamptz
+    sensor_data : jsonb
+  }
+}
+
+' Сплошная линия: внешний ключ внутри одной базы
+user ||--o{ session : имеет
+house ||--o{ zone : имеет
+house ||--o{ house_permission : имеет
+
+' Пунктир: логическая связь между базами разных сервисов (не внешний ключ в СУБД)
+user ||..o{ house_permission : имеет доступ
+house ||..o{ device : содержит
+zone |o..o{ device : размещает
+device ||..o{ device_telemetry : передаёт
+device ||..o{ camera_storage : записывает
+
+legend right
+  Сплошная линия: внешний ключ внутри одной базы
+  Пунктир: логическая связь между базами разных сервисов
+endlegend
+
+@enduml

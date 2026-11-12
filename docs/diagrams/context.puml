@@ -1,0 +1,14 @@
+@startuml 
+!include <C4/C4_Context>
+SHOW_PERSON_OUTLINE()
+HIDE_STEREOTYPE()
+LAYOUT_TOP_DOWN()
+AddRelTag("sync", $lineStyle = BoldLine(), $legendText = "синхронный вызов")
+Person(user, "User", "Пользователь умного дома")
+System(smart_house, "Smart House", "Позволяет пользователям смотреть и устанавливать температуру дома.")
+System_Ext(device, "Device", "Устройство которое устанавливает и передает текущую температуру дома.")
+
+Rel_D(user, smart_house, "Просмотр и контроль температуры дома")
+Rel_R(smart_house, device, "Получение и установка температуры", "HTTP", $tags = "sync")
+SHOW_LEGEND()
+@enduml

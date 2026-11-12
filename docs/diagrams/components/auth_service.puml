@@ -1,0 +1,50 @@
+@startuml
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+
+skinparam linetype ortho
+skinparam wrapWidth 200
+skinparam nodesep 80
+skinparam ranksep 80
+
+' Соседи сервиса
+Container(gateway, "Gateway service", "Kong", "Маршрутизация запросов")
+Container(house_service, "House service", "Go", "Дома, зоны и права пользователей")
+Container(services, "Сервисы системы", "Go", "House, Device, Telemetry: сами проверяют подпись JWT")
+ContainerDb(auth_db, "Auth DB", "PostgreSQL", "Пользователи, сессии, refresh-токены")
+
+' Сам сервис, раскрытый изнутри
+Container_Boundary(auth_service, "Auth Service") {
+    Component(api, "Auth API", "Go", "REST: регистрация, вход, обновление токена, выход")
+    Component(internal_api, "Internal API", "Go", "REST для других сервисов: существует ли пользователь")
+    Component(jwks, "JWKS Endpoint", "Go", "Отдаёт публичные ключи для проверки подписи JWT")
+    Component(logic, "Auth Manager", "Go", "Бизнес-логика: регистрация, проверка учётных данных, сессии")
+    Component(hasher, "Password Hasher", "Go, argon2/bcrypt", "Хеширование и проверка паролей")
+    Component(issuer, "Token Issuer", "Go, JWT RS256", "Подписывает access-токены приватным ключом")
+    Component(repo, "User Repository", "Go", "Чтение и запись пользователей и сессий в БД")
+}
+
+' Раскладка: компоненты одного ряда
+Lay_R(api, internal_api)
+Lay_R(internal_api, jwks)
+Lay_R(hasher, logic)
+Lay_R(logic, issuer)
+
+' Входящие запросы
+Rel_D(gateway, api, "Проксирует запросы пользователя", "REST/HTTPS")
+Rel_D(house_service, internal_api, "Проверяет, существует ли пользователь", "REST")
+Rel_D(services, jwks, "Получают публичный ключ", "REST")
+
+' Внутри сервиса
+Rel_D(api, logic, "Вызывает")
+Rel_D(internal_api, logic, "Вызывает")
+Rel_D(jwks, issuer, "Берёт текущие публичные ключи")
+Rel_L(logic, hasher, "Хеширует и проверяет пароль")
+Rel_R(logic, issuer, "Выпускает access-токен")
+
+' Данные
+Rel_D(logic, repo, "Читает и пишет пользователей и сессии")
+Rel_D(repo, auth_db, "Читает и пишет", "SQL")
+
+SHOW_LEGEND()
+@enduml

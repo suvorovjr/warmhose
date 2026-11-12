@@ -1,0 +1,354 @@
+openapi: 3.0.3
+info:
+  title: Device Service API
+  version: 1.0.0
+  description: |
+    API сервиса устройств экосистемы «Тёплый дом».
+    Команды выполняются асинхронно: сервис сохраняет команду и событие в одной транзакции (outbox),
+    отправляет её устройству через MQTT и сразу отвечает 202 Accepted.
+    Результат выполнения можно получить по идентификатору команды.
+
+servers:
+  - url: https://api.warmhouse.example/device/v1
+    description: Через Gateway (Kong)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Devices
+    description: Информация об устройствах
+  - name: Commands
+    description: Отправка команд и их статусы
+
+paths:
+  /devices/{device_id}:
+    get:
+      tags: [Devices]
+      summary: Получить информацию об устройстве
+      operationId: getDevice
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      responses:
+        '200':
+          description: Устройство найдено
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+              examples:
+                thermostat:
+                  summary: Термостат в гостиной
+                  value:
+                    id: 3f6c1a2e-8b4d-4c1e-9f2a-1b2c3d4e5f60
+                    house_id: 7a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d
+                    zone_id: 9b8a7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d
+                    type: THERMOSTAT
+                    status: ACTIVE
+                    last_seen_at: '2026-11-12T18:40:12Z'
+                    target_state:
+                      temperature: 22
+                    actual_state:
+                      temperature: 21.5
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/DeviceNotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /devices/{device_id}/commands:
+    post:
+      tags: [Commands]
+      summary: Отправить команду устройству
+      description: |
+        Команда проверяется по справочнику команд типа устройства, сохраняется
+        и ставится в очередь на отправку. Ответ возвращается сразу, не дожидаясь устройства.
+      operationId: sendCommand
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandRequest'
+            examples:
+              setTemperature:
+                summary: Установить температуру
+                value:
+                  command: set_temperature
+                  params:
+                    temperature: 22
+              turnOnLight:
+                summary: Включить свет
+                value:
+                  command: turn_on
+                  params: {}
+      responses:
+        '202':
+          description: Команда принята и поставлена в очередь на отправку
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+              examples:
+                accepted:
+                  value:
+                    id: c0ffee00-1234-4abc-9def-0123456789ab
+                    device_id: 3f6c1a2e-8b4d-4c1e-9f2a-1b2c3d4e5f60
+                    command: set_temperature
+                    params:
+                      temperature: 22
+                    status: PENDING
+                    created_at: '2026-11-12T18:41:00Z'
+                    updated_at: '2026-11-12T18:41:00Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/DeviceNotFound'
+        '409':
+          description: Устройство не в статусе ACTIVE (ещё сопрягается или удалено)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: DEVICE_NOT_ACTIVE
+                message: Device is in status PAIRING
+        '422':
+          description: Команда не поддерживается типом устройства или параметры не прошли проверку
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: INVALID_COMMAND_PARAMS
+                message: 'temperature must be between 5 and 30'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /devices/{device_id}/commands/{command_id}:
+    get:
+      tags: [Commands]
+      summary: Получить статус команды
+      operationId: getCommand
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - name: command_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Текущий статус команды
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+              examples:
+                executed:
+                  summary: Устройство подтвердило выполнение
+                  value:
+                    id: c0ffee00-1234-4abc-9def-0123456789ab
+                    device_id: 3f6c1a2e-8b4d-4c1e-9f2a-1b2c3d4e5f60
+                    command: set_temperature
+                    params:
+                      temperature: 22
+                    status: EXECUTED
+                    created_at: '2026-11-12T18:41:00Z'
+                    updated_at: '2026-11-12T18:41:03Z'
+                expired:
+                  summary: Устройство не ответило вовремя
+                  value:
+                    id: c0ffee00-1234-4abc-9def-0123456789ab
+                    device_id: 3f6c1a2e-8b4d-4c1e-9f2a-1b2c3d4e5f60
+                    command: set_temperature
+                    params:
+                      temperature: 22
+                    status: EXPIRED
+                    created_at: '2026-11-12T18:41:00Z'
+                    updated_at: '2026-11-12T18:46:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Устройство или команда не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: COMMAND_NOT_FOUND
+                message: Command c0ffee00-1234-4abc-9def-0123456789ab not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access-токен, выданный Auth service. Подпись проверяется по публичному ключу (JWKS).
+
+  parameters:
+    DeviceId:
+      name: device_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    DeviceType:
+      type: string
+      enum: [CAMERA, LIGHT, THERMOSTAT, GATE]
+
+    DeviceStatus:
+      type: string
+      enum: [PAIRING, ACTIVE, DELETED]
+
+    CommandStatus:
+      type: string
+      description: |
+        PENDING: сохранена, ожидает отправки;
+        SENT: отправлена в MQTT;
+        EXECUTED: устройство подтвердило выполнение;
+        FAILED: устройство сообщило об ошибке;
+        EXPIRED: подтверждение не пришло вовремя.
+      enum: [PENDING, SENT, EXECUTED, FAILED, EXPIRED]
+
+    Device:
+      type: object
+      required: [id, house_id, type, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        house_id:
+          type: string
+          format: uuid
+        zone_id:
+          type: string
+          format: uuid
+          nullable: true
+        type:
+          $ref: '#/components/schemas/DeviceType'
+        status:
+          $ref: '#/components/schemas/DeviceStatus'
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        target_state:
+          type: object
+          description: Желаемое состояние, структура зависит от типа устройства
+          additionalProperties: true
+        actual_state:
+          type: object
+          description: Фактическое состояние, сообщённое устройством
+          additionalProperties: true
+
+    CommandRequest:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          description: Код команды из справочника команд типа устройства
+          example: set_temperature
+        params:
+          type: object
+          description: Параметры команды, проверяются по схеме команды
+          additionalProperties: true
+
+    Command:
+      type: object
+      required: [id, device_id, command, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        device_id:
+          type: string
+          format: uuid
+        command:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+        status:
+          $ref: '#/components/schemas/CommandStatus'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+  responses:
+    BadRequest:
+      description: Некорректный формат запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: BAD_REQUEST
+            message: 'field "command" is required'
+    Unauthorized:
+      description: Токен отсутствует или недействителен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Invalid or expired token
+    Forbidden:
+      description: У пользователя нет прав на дом, к которому привязано устройство
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: FORBIDDEN
+            message: No access to this house
+    DeviceNotFound:
+      description: Устройство не найдено
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: DEVICE_NOT_FOUND
+            message: Device 3f6c1a2e-8b4d-4c1e-9f2a-1b2c3d4e5f60 not found
+    InternalError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: INTERNAL_ERROR
+            message: Unexpected error
