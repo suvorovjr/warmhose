@@ -1,0 +1,50 @@
+@startuml
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+
+skinparam linetype ortho
+skinparam wrapWidth 200
+skinparam nodesep 80
+skinparam ranksep 80
+
+' Соседи сервиса
+Container(gateway, "Gateway service", "Kong", "Маршрутизация запросов")
+Container(auth_service, "Auth service", "Go", "Пользователи и аутентификация")
+ContainerDb(house_db, "House DB", "PostgreSQL", "Дома, зоны, права доступа, outbox")
+ContainerQueue(kafka, "Event Bus", "Apache Kafka", "События между сервисами")
+
+' Сам сервис, раскрытый изнутри
+Container_Boundary(house_service, "House Service") {
+    Component(api, "House API", "Go", "REST: дома и зоны, права и участники дома")
+    Component(auth, "Auth Middleware", "Go", "Проверяет JWT и права текущего пользователя на дом")
+    Component(logic, "House Manager", "Go", "Бизнес-логика и валидация")
+    Component(user_client, "User Client", "Go", "Синхронное обращение к сервису пользователей")
+    Component(repo, "House Repository", "Go", "Чтение и запись домов, зон и прав в БД")
+    Component(outbox, "Outbox Publisher", "Go", "Читает таблицу outbox и публикует события")
+}
+
+' Раскладка: компоненты одного ряда
+Lay_R(auth, logic)
+Lay_R(logic, user_client)
+Lay_R(repo, outbox)
+
+' Входящие запросы
+Rel_D(gateway, api, "Проксирует запросы", "REST/HTTPS")
+Rel_D(api, auth, "Проверяет токен и права")
+Rel_D(api, logic, "Вызывает")
+
+' Проверки
+Rel_D(auth, repo, "Читает права пользователя на дом")
+Rel_R(logic, user_client, "При выдаче прав")
+Rel_U(user_client, auth_service, "Существует ли пользователь", "REST")
+
+' Данные
+Rel_D(logic, repo, "Проверяет дом и зону; сохраняет изменения и событие в одной транзакции")
+Rel_D(repo, house_db, "Читает и пишет", "SQL")
+
+' Исходящие события
+Rel_D(outbox, house_db, "Читает неотправленные события", "SQL")
+Rel_D(outbox, kafka, "Дом, зона, права: созданы, изменены, удалены", "Kafka")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,83 @@
+@startuml
+!include <C4/C4_Container>
+SHOW_PERSON_OUTLINE()
+LAYOUT_TOP_DOWN()
+
+skinparam linetype ortho
+skinparam wrapWidth 160
+skinparam nodesep 70
+skinparam ranksep 90
+
+' Сплошная линия: синхронный вызов, пунктир: асинхронно через брокер
+AddRelTag("async", $lineStyle = DashedLine(), $legendText = "асинхронно через брокер")
+
+Person(user, "User", "Пользователь умного дома")
+
+System_Boundary(smart_house, "Система умного дома") {
+    Container(web, "Web App", "React", "Интерфейс умного дома в браузере")
+    Container(gateway_service, "Gateway service", "Kong", "Маршрутизация")
+
+    Container(auth_service, "Auth service", "Go", "Пользователи и аутентификация")
+    Container(house_service, "House service", "Go", "Дома, зоны и права пользователей")
+    Container(device_service, "Device service", "Go", "Устройства, подключение и команды")
+    Container(telemetry_service, "Telemetry service", "Go", "Приём данных от устройств по MQTT")
+    Container(stream_service, "Media Server", "MediaMTX", "Приём видеопотоков от камер")
+    Container(storage_service, "Storage service", "Go", "Выгрузка записей камер в S3")
+
+    ContainerDb(auth_db, "Auth DB", "PostgreSQL", "Пользователи, сессии")
+    ContainerDb(house_db, "House DB", "PostgreSQL", "Дома, зоны, права, outbox")
+    ContainerDb(device_db, "Device DB", "PostgreSQL", "Устройства, команды, копия прав")
+    ContainerDb(redis, "Telemetry DB", "Redis", "Телеметрия устройств")
+}
+
+ContainerQueue(kafka, "Event Bus", "Apache Kafka", "События между сервисами")
+ContainerQueue(mqtt, "MQTT Broker", "EMQX", "Телеметрия и команды устройств")
+ContainerDb_Ext(s3, "Object Storage", "S3", "Архив видеозаписей с камер")
+
+' Раскладка: сервисы в ряд, базы под ними, Kafka ниже баз, MQTT справа
+Lay_R(auth_service, house_service)
+Lay_R(house_service, device_service)
+Lay_R(device_service, telemetry_service)
+Lay_R(telemetry_service, storage_service)
+Lay_R(storage_service, mqtt)
+Lay_D(house_db, kafka)
+Lay_D(device_db, kafka)
+
+' Связи с Kafka пронумерованы, расшифровка в таблице под диаграммой в документации
+' Вход в систему
+Rel_D(user, web, "Пользуется", "HTTPS")
+Rel_D(web, gateway_service, "API-запросы", "REST/HTTPS")
+
+' Gateway -> сервисы
+Rel_D(gateway_service, auth_service, "Регистрация, JWT", "REST")
+Rel_D(gateway_service, house_service, "Дома и права", "REST")
+Rel_D(gateway_service, device_service, "Устройства и команды", "REST")
+Rel_D(gateway_service, telemetry_service, "Телеметрия", "REST")
+
+' Синхронные проверки
+Rel_L(house_service, auth_service, "Существует ли пользователь", "REST")
+
+' Сервисы -> свои базы (без номера, связь очевидна)
+Rel_D(auth_service, auth_db, "", "SQL")
+Rel_D(house_service, house_db, "", "SQL")
+Rel_D(device_service, device_db, "", "SQL")
+Rel_D(telemetry_service, redis, "", "Redis")
+
+' События через Kafka: все линии вертикальные, Kafka внизу
+Rel_D(house_service, kafka, "1", "outbox", $tags = "async")
+Rel_U(kafka, device_service, "2", "inbox", $tags = "async")
+Rel_D(device_service, kafka, "3", "outbox", $tags = "async")
+
+' Устройства через MQTT (брокер справа)
+Rel_R(device_service, mqtt, "Команды", "MQTT", $tags = "async")
+Rel_L(mqtt, telemetry_service, "Телеметрия и статусы", "MQTT", $tags = "async")
+Rel_D(telemetry_service, kafka, "4", "Kafka", $tags = "async")
+
+' Видео
+Rel_D(stream_service, storage_service, "Сегменты записей", "общий том")
+Rel_R(storage_service, s3, "Загрузка сегментов", "S3 API")
+Rel_D(storage_service, kafka, "5", "Kafka", $tags = "async")
+Rel_U(kafka, telemetry_service, "6", "Kafka", $tags = "async")
+
+SHOW_LEGEND()
+@enduml

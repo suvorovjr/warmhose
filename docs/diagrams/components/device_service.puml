@@ -1,0 +1,53 @@
+@startuml
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+
+skinparam linetype ortho
+skinparam wrapWidth 180
+skinparam nodesep 50
+skinparam ranksep 60
+
+' Соседи сервиса
+Container(gateway, "Gateway service", "Kong", "Маршрутизация запросов")
+ContainerDb(device_db, "Device DB", "PostgreSQL", "Устройства, команды, outbox/inbox, копия домов и прав")
+ContainerQueue(kafka, "Event Bus", "Apache Kafka", "События между сервисами")
+ContainerQueue(mqtt, "MQTT Broker", "EMQX", "Доставка команд устройствам")
+
+' Сам сервис, раскрытый изнутри
+Container_Boundary(device_service, "Device Service") {
+    Component(api, "Device API", "Go", "REST-эндпоинты: подключить/удалить устройство, отправить команды")
+    Component(auth, "Auth Middleware", "Go", "Проверяет JWT и права пользователя на дом")
+    Component(logic, "Device Manager", "Go", "Бизнес-логика: валидация, привязка устройств")
+    Component(repo, "Device Repository", "Go", "Чтение и запись устройств и команд в БД")
+    Component(outbox, "Outbox Publisher", "Go", "Читает таблицу outbox и публикует события и команды")
+    Component(inbox, "Inbox Consumer", "Go", "Получает события, проверяет, не обработаны ли они, и записывает в БД")
+}
+
+' Раскладка: компоненты одного ряда
+Lay_R(auth, logic)
+Lay_R(outbox, inbox)
+
+' Входящие запросы
+Rel_D(gateway, api, "Проксирует запросы", "REST/HTTPS")
+Rel_D(api, auth, "Проверяет токен и права")
+Rel_D(api, logic, "Вызывает")
+
+' Проверки
+Rel_D(auth, repo, "Читает копию прав пользователей")
+Rel_D(logic, repo, "Проверяет по копии, что дом и зона существуют")
+
+' Данные
+Rel_D(logic, repo, "Сохраняет изменения и событие в одной транзакции")
+Rel_D(repo, device_db, "Читает и пишет", "SQL")
+
+' Исходящие события и команды
+Rel_D(outbox, device_db, "Читает неотправленные события", "SQL")
+Rel_D(outbox, kafka, "Устройство добавлено/удалено, команда создана/обработана", "Kafka")
+Rel_D(outbox, mqtt, "Отправка команд", "MQTT")
+
+' Входящие события
+Rel_U(kafka, inbox, "Дома, зоны, права; статусы устройств от Telemetry", "Kafka")
+Rel_D(inbox, device_db, "Проверяет, обработано ли сообщение; если нет, записывает", "SQL")
+
+SHOW_LEGEND()
+@enduml

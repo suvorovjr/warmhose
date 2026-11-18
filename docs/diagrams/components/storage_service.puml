@@ -1,0 +1,44 @@
+@startuml
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+
+skinparam linetype ortho
+skinparam wrapWidth 200
+skinparam nodesep 80
+skinparam ranksep 80
+
+' Соседи сервиса
+Container(media_server, "Media Server", "MediaMTX", "Принимает видеопотоки и пишет сегменты по минуте")
+ContainerDb(volume, "Shared Volume", "Kubernetes PVC", "Записанные сегменты, ожидающие выгрузки")
+ContainerDb_Ext(s3, "Object Storage", "S3", "Архив видеозаписей, ретеншн через lifecycle-правила")
+ContainerQueue(kafka, "Event Bus", "Apache Kafka", "События между сервисами")
+
+' Сам сервис, раскрытый изнутри
+Container_Boundary(storage_service, "Storage Service") {
+    Component(watcher, "Segment Watcher", "Go", "Находит в папке новые завершённые сегменты")
+    Component(checker, "Integrity Checker", "Go", "Считает контрольную сумму сегмента")
+    Component(uploader, "S3 Uploader", "Go, S3 SDK", "Загружает сегмент с контрольной суммой в приватный бакет")
+    Component(publisher, "Event Publisher", "Go", "Публикует событие о загруженном сегменте")
+    Component(cleaner, "Local Cleaner", "Go", "Удаляет сегмент с диска после подтверждённой загрузки")
+}
+
+' Раскладка
+Lay_R(watcher, checker)
+Lay_R(checker, uploader)
+Lay_R(publisher, cleaner)
+
+' Запись видео
+Rel_D(media_server, volume, "Пишет сегменты", "файлы")
+Rel_D(watcher, volume, "Читает новые сегменты", "файлы")
+
+' Конвейер выгрузки
+Rel_R(watcher, checker, "Передаёт сегмент")
+Rel_R(checker, uploader, "Сегмент и контрольная сумма")
+Rel_R(uploader, s3, "Загружает сегмент", "S3 API")
+Rel_D(uploader, publisher, "Сегмент загружен")
+Rel_D(publisher, kafka, "Камера, время начала и конца, путь в S3", "Kafka")
+Rel_R(uploader, cleaner, "Загрузка подтверждена")
+Rel_U(cleaner, volume, "Удаляет выгруженный сегмент", "файлы")
+
+SHOW_LEGEND()
+@enduml
