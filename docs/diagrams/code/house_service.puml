@@ -1,0 +1,135 @@
+@startuml
+title House service: выдача прав на дом (код)
+
+hide empty members
+skinparam linetype ortho
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam defaultFontName "Helvetica"
+skinparam defaultFontSize 13
+skinparam nodesep 60
+skinparam ranksep 60
+skinparam packageStyle rectangle
+skinparam package {
+  BorderColor #C9CED6
+  BackgroundColor #FBFBFC
+  FontColor #6B7280
+  FontStyle normal
+}
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #9AA3AF
+  HeaderBackgroundColor #EEF1F6
+  AttributeFontColor #374151
+}
+skinparam ArrowColor #8A94A3
+skinparam ArrowFontColor #6B7280
+
+package "api" {
+  class HouseHandler {
+    - manager : *HouseManager
+    + CreateHouse(w, r)
+    + CreateZone(w, r)
+    + GrantPermission(w, r)
+    + RevokePermission(w, r)
+  }
+  class AuthMiddleware {
+    - publicKeys : JWKS
+    - repo : HouseRepository
+    + Authenticate(next) Handler
+    + RequirePermission(houseID, permission) error
+  }
+}
+
+package "domain" {
+  class HouseManager {
+    - repo : HouseRepository
+    - users : UserClient
+    + CreateHouse(ctx, ownerID, name, address) (House, error)
+    + CreateZone(ctx, houseID, name, zoneType) (Zone, error)
+    + GrantPermission(ctx, houseID, userID, permission) error
+    + RevokePermission(ctx, houseID, userID) error
+  }
+
+  class House {
+    + ID : uuid
+    + Name : string
+    + Address : *string
+  }
+  class Zone {
+    + ID : uuid
+    + HouseID : uuid
+    + Name : string
+    + Type : ZoneType
+  }
+  class HousePermission {
+    + UserID : uuid
+    + HouseID : uuid
+    + Permission : Permission
+  }
+  enum Permission {
+    GET
+    SET
+  }
+  enum ZoneType {
+    GARAGE
+    OUTSIDE
+    ROOM
+    OTHER
+  }
+
+  interface HouseRepository {
+    + SaveHouse(ctx, House, OutboxEvent) error
+    + SaveZone(ctx, Zone, OutboxEvent) error
+    + SavePermission(ctx, HousePermission, OutboxEvent) error
+    + DeletePermission(ctx, houseID, userID, OutboxEvent) error
+    + GetPermission(ctx, houseID, userID) (HousePermission, error)
+  }
+  interface UserClient {
+    + Exists(ctx, userID) (bool, error)
+  }
+}
+
+package "infrastructure" {
+  class PostgresHouseRepository {
+    - db : *pgxpool.Pool
+  }
+  class HTTPUserClient {
+    - baseURL : string
+    - http : *http.Client
+  }
+  class OutboxEvent {
+    + ID : uuid
+    + Key : string
+    + Payload : json
+    + Version : int64
+    + PublishedAt : *time.Time
+  }
+  class OutboxPublisher {
+    - db : *pgxpool.Pool
+    - producer : kafka.Producer
+    + Run(ctx)
+  }
+}
+
+HouseHandler --> HouseManager : вызывает
+HouseHandler ..> AuthMiddleware : защищён
+AuthMiddleware --> HouseRepository : читает права
+HouseManager --> HouseRepository
+HouseManager --> UserClient : проверка при выдаче прав
+HouseManager ..> House : создаёт
+HouseManager ..> Zone : создаёт
+HouseManager ..> HousePermission : создаёт
+HouseManager ..> OutboxEvent : создаёт
+HousePermission --> Permission
+Zone --> ZoneType
+PostgresHouseRepository ..|> HouseRepository
+HTTPUserClient ..|> UserClient
+OutboxPublisher ..> OutboxEvent : публикует в Kafka\nключ house_id:user_id
+
+note right of PostgresHouseRepository
+  Изменение и OutboxEvent
+  сохраняются в одной транзакции
+end note
+
+@enduml

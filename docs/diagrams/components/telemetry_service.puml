@@ -1,0 +1,57 @@
+@startuml
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+
+skinparam linetype ortho
+skinparam wrapWidth 200
+skinparam nodesep 80
+skinparam ranksep 80
+
+' Соседи сервиса
+Container(gateway, "Gateway service", "Kong", "Маршрутизация запросов")
+ContainerQueue(mqtt, "MQTT Broker", "EMQX", "Телеметрия и статусы устройств")
+ContainerQueue(kafka, "Event Bus", "Apache Kafka", "События между сервисами")
+ContainerDb(redis, "Telemetry DB", "Redis", "Последние показания, история, индекс видеозаписей")
+ContainerDb_Ext(s3, "Object Storage", "S3", "Архив видеозаписей с камер")
+
+' Сам сервис, раскрытый изнутри
+Container_Boundary(telemetry_service, "Telemetry Service") {
+    Component(api, "Telemetry API", "Go", "REST: последние показания, история за период, ссылки на видеозаписи")
+    Component(auth, "Auth Middleware", "Go", "Проверяет JWT текущего пользователя")
+    Component(mqtt_consumer, "MQTT Consumer", "Go", "Подписан на топики телеметрии и статусов устройств")
+    Component(processor, "Telemetry Processor", "Go", "Сохраняет показания, отслеживает онлайн/офлайн устройств")
+    Component(video_consumer, "Video Index Consumer", "Go", "Получает события о загруженных сегментах видео")
+    Component(video_links, "Video Link Generator", "Go, S3 SDK", "Выдаёт presigned-ссылки на сегменты записи")
+    Component(repo, "Telemetry Repository", "Go", "Чтение и запись телеметрии и индекса видео")
+    Component(publisher, "Event Publisher", "Go", "Публикует события об устройствах")
+}
+
+' Раскладка
+Lay_R(api, mqtt_consumer)
+Lay_R(mqtt_consumer, video_consumer)
+Lay_R(video_links, processor)
+Lay_R(processor, publisher)
+
+' Входящие запросы
+Rel_D(gateway, api, "Проксирует запросы", "REST/HTTPS")
+Rel_D(api, auth, "Проверяет токен")
+Rel_D(api, repo, "Читает показания и индекс записей")
+Rel_D(api, video_links, "Запрашивает ссылки на период")
+Rel_R(video_links, s3, "Подписывает ссылки на объекты", "S3 API")
+
+' Телеметрия от устройств
+Rel_D(mqtt, mqtt_consumer, "Телеметрия и статусы", "MQTT")
+Rel_D(mqtt_consumer, processor, "Передаёт сообщения")
+Rel_D(processor, repo, "Сохраняет показания и статус")
+Rel_R(processor, publisher, "Устройство отключилось")
+Rel_D(publisher, kafka, "Статусы устройств", "Kafka")
+
+' Видео
+Rel_U(kafka, video_consumer, "Сегмент видео загружен", "Kafka")
+Rel_D(video_consumer, repo, "Добавляет сегмент в индекс")
+
+' Данные
+Rel_D(repo, redis, "Читает и пишет", "Redis")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,62 @@
+name: PlantUML Diagrams
+
+on:
+  push:
+    branches:
+      - warmhouse
+      - main
+    paths:
+      - 'docs/diagrams/**/*.puml'
+      - '.github/workflows/plantuml.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PLANTUML_VERSION: '1.2024.7'
+
+jobs:
+  generate-diagrams:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Download PlantUML
+        run: |
+          curl -sSL -o plantuml.jar \
+            "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar"
+          java -jar plantuml.jar -version
+
+      - name: Generate diagrams
+        run: |
+          # docs/diagrams/components/x.puml -> docs/images/components/x.svg
+          find docs/diagrams -name '*.puml' | while read -r src; do
+            rel_dir=$(dirname "${src#docs/diagrams}")
+            out_dir="$GITHUB_WORKSPACE/docs/images${rel_dir}"
+            mkdir -p "$out_dir"
+            java -jar plantuml.jar -tsvg -failfast2 -o "$out_dir" "$src"
+          done
+
+      - name: Commit diagrams
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add docs/images
+          if git diff --staged --quiet; then
+            echo "Диаграммы не изменились"
+          else
+            git commit -m "Обновление диаграмм [skip ci]"
+            git push
+          fi
