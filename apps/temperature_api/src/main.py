@@ -1,10 +1,12 @@
 import random
-import uvicorn
 from datetime import UTC, datetime
 from typing import Annotated
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Query, status
 from pydantic import BaseModel, Field
+
+LOCATIONS = {"1": "Living Room", "2": "Bedroom", "3": "Kitchen"}
 
 
 class TemperatureResponse(BaseModel):
@@ -29,6 +31,15 @@ async def get_temperature(location: Annotated[str, Query(description="Назва
         value=random.randint(0, 50),
         location=location,
         sensor_id=f"sensor-{random.randint(1, 100)}",
+    )
+
+
+@app.get(path="/temperature/{sensor_id}")
+async def get_temperature_by_id(sensor_id: str) -> TemperatureResponse:
+    return TemperatureResponse(
+        value=random.randint(0, 50),
+        location=LOCATIONS.get(sensor_id, "Unknown"),
+        sensor_id=sensor_id,
     )
 
 
