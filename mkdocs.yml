@@ -1,0 +1,10 @@
+site_name: My Docs
+theme: material
+nav:
+  - Home: index.md
+  - As-Is: architecture/as-is.md
+markdown_extensions:
+  - md_in_html
+  - plantuml_markdown:
+      format: svg
+      base_dir: docs

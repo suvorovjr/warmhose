@@ -192,3 +192,12 @@ build/
 
 tmp/
 task-*
+
+# Python / инструменты
+.venv/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+
+# MkDocs
+site/

@@ -1,0 +1,18 @@
+[project]
+name = "temperature-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.162.5",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.5",
+]
+
+[tool.ruff]
+line-length=120
